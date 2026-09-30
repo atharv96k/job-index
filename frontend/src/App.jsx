@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 
 // Connects to your Render backend in production or localhost in development
-const API_BASE =  'http://localhost:5000/api';
+const API_BASE = import.meta.env.VITE_API_URL;
 
 export default function App() {
   // Session & Authentication state (restores unlocked session on page refresh)
