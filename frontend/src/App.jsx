@@ -237,7 +237,7 @@ export default function App() {
 
       const savedJob = await res.json();
       setJobs([savedJob, ...jobs]);
-      setNewJob({ title: '', company: '', url: '', tag: 'Remote', urgency: 'medium', notes: '', starred: false });
+      setNewJob({ title: 'SDE', company: '', url: '', tag: 'In Person', urgency: 'medium', notes: '', starred: false });
       setShowAddModal(false);
       showToast('Job link added');
     } catch (err) {
