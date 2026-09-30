@@ -8,7 +8,6 @@ import {
   Lock, 
   Unlock, 
   FileText, 
-  Download, 
   Upload, 
   Search, 
   Sparkles, 
@@ -23,14 +22,14 @@ import {
   FileDown
 } from 'lucide-react';
 
-// Connects silently to your Express + MongoDB Atlas backend
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+// Connects to your Render backend in production or localhost in development
+const API_BASE = import.meta.env.VITE_API_URL;
 
 export default function App() {
-  // Authentication & Security state
-  const [isAdmin, setIsAdmin] = useState(false);
+  // Session & Authentication state (restores unlocked session on page refresh)
+  const [storedPin, setStoredPin] = useState(() => sessionStorage.getItem('jobdrop_session_pin') || '');
+  const [isAdmin, setIsAdmin] = useState(() => Boolean(sessionStorage.getItem('jobdrop_session_pin')));
   const [pinInput, setPinInput] = useState('');
-  const [storedPin, setStoredPin] = useState(() => localStorage.getItem('jobdrop_pin') || '1234');
   const [showPinModal, setShowPinModal] = useState(false);
   const [pinError, setPinError] = useState('');
 
@@ -47,10 +46,10 @@ export default function App() {
 
   // Filter & Search states
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeFilter, setActiveFilter] = useState('active');
+  const [activeFilter, setActiveFilter] = useState('active'); // 'active' | 'applied' | 'starred' | 'all'
   const [copiedId, setCopiedId] = useState(null);
 
-  // Modals
+  // Modals & Notifications
   const [showAddModal, setShowAddModal] = useState(false);
   const [showResumeUploadModal, setShowResumeUploadModal] = useState(false);
   const [showPdfViewerModal, setShowPdfViewerModal] = useState(false);
@@ -62,7 +61,7 @@ export default function App() {
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef(null);
 
-  // Form input state
+  // Form input state for adding a link
   const [newJob, setNewJob] = useState({
     title: '',
     company: '',
@@ -80,7 +79,7 @@ export default function App() {
     }, 2500);
   };
 
-  // Fetch jobs & resume from backend (MongoDB Atlas)
+  // Fetch initial data from backend (MongoDB Atlas)
   const fetchData = async () => {
     setIsLoading(true);
     try {
@@ -121,27 +120,42 @@ export default function App() {
             updated.company = domain.charAt(0).toUpperCase() + domain.slice(1);
           }
         } catch {
-          // url typing in progress
+          // typing incomplete URL
         }
       }
       return updated;
     });
   };
 
-  const handleUnlockAdmin = (e) => {
+  // 1. Unlock Admin Mode via Backend API (Queries MongoDB Atlas)
+  const handleUnlockAdmin = async (e) => {
     e.preventDefault();
-    if (pinInput === storedPin) {
-      setIsAdmin(true);
-      setShowPinModal(false);
-      setPinInput('');
-      setPinError('');
-      showToast('Admin Mode Unlocked');
-    } else {
-      setPinError('Incorrect PIN');
+    setPinError('');
+    try {
+      const res = await fetch(`${API_BASE}/verify-pin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: pinInput })
+      });
+
+      if (res.ok) {
+        setIsAdmin(true);
+        setStoredPin(pinInput);
+        sessionStorage.setItem('jobdrop_session_pin', pinInput);
+        setShowPinModal(false);
+        setPinInput('');
+        showToast('Admin Mode Unlocked');
+      } else {
+        const data = await res.json();
+        setPinError(data.error || 'Incorrect PIN');
+      }
+    } catch (err) {
+      setPinError('Unable to connect to server');
     }
   };
 
-  const handleUpdatePin = (e) => {
+  // 2. Update PIN in MongoDB Atlas across all devices
+  const handleUpdatePin = async (e) => {
     e.preventDefault();
     if (newPin.length < 4) {
       setChangePinError('PIN must be at least 4 digits');
@@ -151,21 +165,41 @@ export default function App() {
       setChangePinError('PINs do not match');
       return;
     }
-    setStoredPin(newPin);
-    localStorage.setItem('jobdrop_pin', newPin);
-    setShowChangePinModal(false);
-    setNewPin('');
-    setConfirmPin('');
-    setChangePinError('');
-    showToast('PIN updated successfully');
+
+    try {
+      const res = await fetch(`${API_BASE}/update-pin`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-pin': storedPin
+        },
+        body: JSON.stringify({ newPin })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update PIN');
+
+      setStoredPin(newPin);
+      sessionStorage.setItem('jobdrop_session_pin', newPin);
+      setShowChangePinModal(false);
+      setNewPin('');
+      setConfirmPin('');
+      setChangePinError('');
+      showToast('PIN updated across all devices!');
+    } catch (err) {
+      setChangePinError(err.message);
+    }
   };
 
+  // 3. Lock button clears session
   const handleLockAdmin = () => {
     setIsAdmin(false);
-    showToast('Locked');
+    setStoredPin('');
+    sessionStorage.removeItem('jobdrop_session_pin');
+    showToast('Switched to Guest Mode');
   };
 
-  // Add job link
+  // Add Job Link -> POST to MongoDB Atlas
   const handleCreateJob = async (e) => {
     e.preventDefault();
     if (!newJob.url.trim()) return;
@@ -196,19 +230,22 @@ export default function App() {
         body: JSON.stringify(payload)
       });
 
-      if (!res.ok) throw new Error('Failed to save');
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Failed to save job');
+      }
 
       const savedJob = await res.json();
       setJobs([savedJob, ...jobs]);
       setNewJob({ title: '', company: '', url: '', tag: 'Remote', urgency: 'medium', notes: '', starred: false });
       setShowAddModal(false);
-      showToast('Link added');
+      showToast('Job link added');
     } catch (err) {
       alert(err.message || 'Error saving link');
     }
   };
 
-  // Status toggle
+  // Status Toggle -> PATCH to MongoDB Atlas
   const toggleJobStatus = async (job) => {
     const id = job._id || job.id;
     const nextStatus = job.status === 'active' ? 'applied' : 'active';
@@ -230,11 +267,11 @@ export default function App() {
       );
       showToast('Status updated');
     } catch (err) {
-      showToast('Failed to update');
+      showToast('Failed to update status');
     }
   };
 
-  // Star toggle
+  // Star Toggle -> PATCH to MongoDB Atlas
   const toggleJobStar = async (job) => {
     const id = job._id || job.id;
     const nextStar = !job.starred;
@@ -255,11 +292,11 @@ export default function App() {
         prev.map((j) => ((j._id || j.id) === id ? { ...j, starred: nextStar } : j))
       );
     } catch (err) {
-      showToast('Failed to update');
+      showToast('Failed to update star');
     }
   };
 
-  // Delete link
+  // Delete Job -> DELETE to MongoDB Atlas
   const handleDeleteJob = async (id) => {
     try {
       const res = await fetch(`${API_BASE}/jobs/${id}`, {
@@ -274,11 +311,11 @@ export default function App() {
       setJobs((prev) => prev.filter((j) => (j._id || j.id) !== id));
       showToast('Link removed');
     } catch (err) {
-      showToast('Failed to delete');
+      showToast('Failed to delete link');
     }
   };
 
-  // PDF Upload
+  // PDF Resume Upload -> POST Multipart to MongoDB Atlas
   const processUploadedPdf = async (file) => {
     setUploadError('');
 
@@ -305,7 +342,10 @@ export default function App() {
         body: formData
       });
 
-      if (!res.ok) throw new Error('Upload failed');
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Upload failed');
+      }
 
       const resumeRes = await fetch(`${API_BASE}/resume`);
       const updatedResume = await resumeRes.json();
@@ -380,7 +420,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-indigo-600 selection:text-white">
-      {/* Clean Linktree-style Header */}
+      {/* Header */}
       <header className="sticky top-0 z-30 border-b border-slate-800/80 bg-slate-950/85 backdrop-blur-md px-4 py-3 sm:px-6">
         <div className="max-w-2xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -896,7 +936,7 @@ export default function App() {
                   onClick={handleDirectDownloadResume}
                   className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium px-3.5 py-1.5 rounded-xl transition"
                 >
-                  <Download className="h-3.5 w-3.5" />
+                  <FileDown className="h-3.5 w-3.5" />
                   <span>Download</span>
                 </button>
                 <button
@@ -948,7 +988,7 @@ export default function App() {
                 type="password"
                 maxLength="8"
                 autoFocus
-                placeholder="Enter PIN Here.."
+                placeholder="PIN"
                 value={pinInput}
                 onChange={(e) => {
                   setPinInput(e.target.value);
