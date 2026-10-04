@@ -19,11 +19,97 @@ import {
   X,
   FileCheck,
   Star,
-  FileDown
+  FileDown,
+  ChevronDown
 } from 'lucide-react';
 
 // Connects to your Render backend in production or localhost in development
 const API_BASE = import.meta.env.VITE_API_URL;
+
+// Dropdown options for the Add Job form
+const ROLE_OPTIONS = [
+  'Software Engineer',
+  'Java Developer',
+  'Backend Developer',
+  'Java Full Stack Developer',
+  'Full Stack Developer',
+  'Spring Boot Developer',
+  'Software Developer (SDE)',
+  'Associate Software Engineer',
+  'Graduate Engineer Trainee'
+];
+
+const TAG_OPTIONS = ['Hybrid', 'Remote', 'On Site'];
+
+const PRIORITY_OPTIONS = [
+  { value: 'high', label: 'High Urgency' },
+  { value: 'medium', label: 'Standard' },
+  { value: 'low', label: 'Casual' }
+];
+
+// Custom styled dropdown (replaces the native browser <select> popup)
+function CustomSelect({ value, onChange, options }) {
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef(null);
+
+  useEffect(() => {
+    const handleOutside = (e) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, []);
+
+  const normalized = options.map((o) =>
+    typeof o === 'string' ? { value: o, label: o } : o
+  );
+  const selected = normalized.find((o) => o.value === value);
+
+  return (
+    <div className="relative" ref={wrapperRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        className={`w-full flex items-center justify-between gap-2 bg-slate-950 border rounded-xl px-3 py-2 text-left text-slate-100 transition focus:outline-none ${
+          open ? 'border-indigo-500 ring-1 ring-indigo-500' : 'border-slate-800 hover:border-slate-700'
+        }`}
+      >
+        <span className="truncate">{selected ? selected.label : 'Select'}</span>
+        <ChevronDown
+          className={`h-4 w-4 text-slate-400 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
+        />
+      </button>
+
+      {open && (
+        <div className="absolute z-50 mt-1.5 w-full max-h-52 overflow-y-auto bg-slate-900 border border-slate-700 rounded-xl shadow-2xl shadow-black/60 p-1">
+          {normalized.map((opt) => {
+            const isSelected = opt.value === value;
+            return (
+              <button
+                type="button"
+                key={opt.value}
+                onClick={() => {
+                  onChange(opt.value);
+                  setOpen(false);
+                }}
+                className={`w-full flex items-center justify-between gap-2 text-left px-3 py-2 rounded-lg transition ${
+                  isSelected
+                    ? 'bg-indigo-500/20 text-indigo-300'
+                    : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                }`}
+              >
+                <span className="truncate">{opt.label}</span>
+                {isSelected && <Check className="h-3.5 w-3.5 shrink-0" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function App() {
   // Session & Authentication state (restores unlocked session on page refresh)
@@ -63,7 +149,7 @@ export default function App() {
 
   // Form input state for adding a link
   const [newJob, setNewJob] = useState({
-    title: '',
+    title: ROLE_OPTIONS[0],
     company: '',
     url: '',
     tag: 'Remote',
@@ -237,7 +323,7 @@ export default function App() {
 
       const savedJob = await res.json();
       setJobs([savedJob, ...jobs]);
-      setNewJob({ title: 'SDE', company: '', url: '', tag: 'In Person', urgency: 'medium', notes: '', starred: false });
+      setNewJob({ title: ROLE_OPTIONS[0], company: '', url: '', tag: 'Remote', urgency: 'medium', notes: '', starred: false });
       setShowAddModal(false);
       showToast('Job link added');
     } catch (err) {
@@ -785,12 +871,10 @@ export default function App() {
                 </div>
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">Role Title</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Software Engineer"
+                  <CustomSelect
                     value={newJob.title}
-                    onChange={(e) => setNewJob({ ...newJob, title: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 placeholder-slate-600 focus:outline-none"
+                    onChange={(val) => setNewJob({ ...newJob, title: val })}
+                    options={ROLE_OPTIONS}
                   />
                 </div>
               </div>
@@ -798,25 +882,19 @@ export default function App() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">Tag</label>
-                  <input
-                    type="text"
-                    placeholder="Remote / Hybrid"
+                  <CustomSelect
                     value={newJob.tag}
-                    onChange={(e) => setNewJob({ ...newJob, tag: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 placeholder-slate-600 focus:outline-none"
+                    onChange={(val) => setNewJob({ ...newJob, tag: val })}
+                    options={TAG_OPTIONS}
                   />
                 </div>
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">Priority</label>
-                  <select
+                  <CustomSelect
                     value={newJob.urgency}
-                    onChange={(e) => setNewJob({ ...newJob, urgency: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 focus:outline-none"
-                  >
-                    <option value="high">High Urgency</option>
-                    <option value="medium">Standard</option>
-                    <option value="low">Casual</option>
-                  </select>
+                    onChange={(val) => setNewJob({ ...newJob, urgency: val })}
+                    options={PRIORITY_OPTIONS}
+                  />
                 </div>
               </div>
 
